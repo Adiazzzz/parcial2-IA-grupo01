@@ -1,13 +1,18 @@
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import seaborn as sns
 
 RAIZ = Path(__file__).resolve().parents[1]
 DATA = RAIZ / "data"
 ARCHIVO = DATA / "grupo_01.csv"
 ARCHIVO_LIMPIO = DATA / "grupo_01_limpio.csv"
-UMBRAL_KM = 100  
-
+GRAFICOS = RAIZ / "outputs" / "graficos"
+UMBRAL_KM = 100
 
 def linea(titulo):
     print("\n" + "=" * 60)
@@ -189,6 +194,124 @@ def pregunta_clave_media(original, limpio):
     print(f"Estandarización corregida:    todas las fincas quedan entre z = "
           f"{z_ok.min():.2f} y {z_ok.max():.2f}")
 
+# TAREA 4. Visualización con Seaborn.
+
+def graficar(limpio):
+    linea("TAREA 4 - VISUALIZACIÓN")
+    GRAFICOS.mkdir(exist_ok=True)
+
+    # Gráfico 1: dispersión de altitud vs lluvia, coloreada por la cosecha
+    plt.figure(figsize=(7, 5))
+    sns.scatterplot(data=limpio, x="altitud_msnm", y="lluvia_mm_mes",
+                    hue="cosecha_buena", palette={0: "tab:red", 1: "tab:green"})
+    plt.title("Altitud vs lluvia según calidad de la cosecha")
+    plt.xlabel("Altitud (msnm)")
+    plt.ylabel("Lluvia (mm/mes)")
+    plt.tight_layout()
+    plt.savefig(GRAFICOS / "grafico1_dispersion.png", dpi=150)
+    plt.close()
+
+    # Gráfico 2: fincas por municipio según la cosecha
+    plt.figure(figsize=(8, 5))
+    sns.countplot(data=limpio, x="municipio", hue="cosecha_buena",
+                  palette={0: "tab:red", 1: "tab:green"})
+    plt.title("Fincas con cosecha buena y deficiente por municipio")
+    plt.xlabel("Municipio")
+    plt.ylabel("Número de fincas")
+    plt.legend(title="Cosecha buena (0 = deficiente, 1 = buena)")
+    plt.tight_layout()
+    plt.savefig(GRAFICOS / "grafico2_countplot_municipio.png", dpi=150)
+    plt.close()
+
+    print(pd.crosstab(limpio["municipio"], limpio["cosecha_buena"]))
+    print(f"Gráficos guardados en {GRAFICOS}")
+
+    # TAREA 5. Perceptrón desde cero con NumPy.
+
+def sigmoide(z):
+    return 1 / (1 + np.exp(-z))
+
+
+def predecir_proba(X, w, b):
+    return sigmoide(X @ w + b)
+
+
+def perdida_logaritmica(y, p):
+    p = np.clip(p, 1e-12, 1 - 1e-12)
+    return -np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+
+def exactitud(y, p):
+    return np.mean((p >= 0.5).astype(int) == y)
+
+
+def entrenar_perceptron(limpio, epocas=500, tasa=0.1):
+    linea("TAREA 5 - PERCEPTRÓN CON NUMPY")
+    X = limpio[["altitud_msnm", "lluvia_mm_mes"]].to_numpy(dtype=float)
+    y = limpio["cosecha_buena"].to_numpy(dtype=float)
+
+    media = X.mean(axis=0)
+    desv = X.std(axis=0)
+    Xz = (X - media) / desv
+    print(f"Media: {media.round(2)} | Desviación: {desv.round(2)}")
+
+    rng = np.random.default_rng(42)
+    w = rng.normal(0, 0.1, size=2)
+    b = 0.0
+    w0, b0 = w.copy(), b
+    n = len(y)
+    perdidas, exactitudes = [], []
+
+    for _ in range(epocas):
+        p = predecir_proba(Xz, w, b)
+        perdidas.append(perdida_logaritmica(y, p))
+        exactitudes.append(exactitud(y, p))
+        error = p - y
+        w = w - tasa * (Xz.T @ error) / n
+        b = b - tasa * error.mean()
+
+    p = predecir_proba(Xz, w, b)
+    print(f"Pesos iniciales: w1={w0[0]:.4f}, w2={w0[1]:.4f}, b={b0:.4f}")
+    print(f"Pesos finales:   w1={w[0]:.4f}, w2={w[1]:.4f}, b={b:.4f}")
+    print(f"Pérdida inicial: {perdidas[0]:.4f} | final: {perdida_logaritmica(y, p):.4f}")
+    print(f"Exactitud final: {exactitud(y, p):.2%}")
+    errores = int(((p >= 0.5).astype(int) != y).sum())
+    print(f"Registros del lado equivocado: {errores} de {n}")
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(range(1, epocas + 1), perdidas)
+    plt.title("Curva de aprendizaje (pérdida logarítmica)")
+    plt.xlabel("Época")
+    plt.ylabel("Pérdida")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(GRAFICOS / "curva_aprendizaje.png", dpi=150)
+    plt.close()
+
+    
+    plt.figure(figsize=(7, 5))
+    sns.scatterplot(data=limpio, x="altitud_msnm", y="lluvia_mm_mes",
+                    hue="cosecha_buena", palette={0: "tab:red", 1: "tab:green"})
+    alt = np.linspace(X[:, 0].min(), X[:, 0].max(), 100)
+    z1 = (alt - media[0]) / desv[0]
+    z2 = -(w[0] * z1 + b) / w[1]
+    lluvia = z2 * desv[1] + media[1]
+    plt.plot(alt, lluvia, "k--", label="Frontera de decisión")
+    plt.ylim(X[:, 1].min() - 10, X[:, 1].max() + 10)
+    plt.title("Frontera de decisión del perceptrón")
+    plt.xlabel("Altitud (msnm)")
+    plt.ylabel("Lluvia (mm/mes)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(GRAFICOS / "frontera_decision.png", dpi=150)
+    plt.close()
+
+    # Tarea 6, punto 3: registros nuevos inventados
+    nuevos = np.array([[1850.0, 200.0], [1300.0, 120.0]])
+    pn = predecir_proba((nuevos - media) / desv, w, b)
+    for fila, prob in zip(nuevos, pn):
+        print(f"Registro altitud={fila[0]:.0f} m, lluvia={fila[1]:.0f} mm "
+              f"-> P(cosecha buena)={prob:.3f}")
 
 def main():
     print("=" * 60)
@@ -209,6 +332,9 @@ def main():
 
     limpio.to_csv(ARCHIVO_LIMPIO, index=False)
     print(f"\nDataset limpio guardado en '{ARCHIVO_LIMPIO}'")
+
+    graficar(limpio)
+    entrenar_perceptron(limpio)
 
 
 if __name__ == "__main__":
